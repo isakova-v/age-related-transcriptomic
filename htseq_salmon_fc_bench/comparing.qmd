@@ -1,0 +1,393 @@
+---
+title: "Hackaton_preparation_and_templates"
+format: html
+editor: visual
+---
+
+## Мысли
+
+Запускать `estimateSizeFactors()` с контрольными генами -- 9 пан-тишью и тканеспецифичные по ситуации. Не будет ли это дабл-диппингом?
+
+```{r}
+# library(DESeq2)
+# library(clusterProfiler)
+# library(WGCNA)
+# library(IRanges)
+# library(tximport)
+# library(org.Mm.eg.db)
+library(edgeR)
+library(tidyverse)
+library(EDASeq)
+```
+
+# Стратегия проверки
+
+1. Прочитать метадату, выкинуть NA
+2. Отфильтровать по каунтам HTSEQ
+2.1 Выкинуть образцы HTSEQ из FC и salmon
+2.2 Фильтровать по отсечке для каждого типа подсчета каунтов
+3. Сравнить полученные матрицы сырых ридов между собой
+3.1 Пирсоновская корреляция на общем датасете (без нулей везде)
+3.2 Пирсоновская корреляция на датасете, с максимальным удалением образцов
+4. Посмотреть на ДЭ, сравнить разные эксперименты (направление ДЭ, логфолчендж для разных генов)
+
+> TODO Фильтрация как в статье
+> DE пан-тишью и потканевая
+
+Итого 18 DE на 2 вида фильтрации (36)
+
+## Таблица с каунтами
+
+##### Оценить распределение для потранскриптного салмона
+
+```{r}
+# Читаем каунты
+htseq_raw <- read.csv("htseq/old_counts.csv")
+# Присваиваем имена генов
+gene_names <- htseq_raw[[1]]
+# Правим имена образцов
+colnames(htseq_raw) <- colnames(htseq_raw) |> str_split_i("\\.", 1)
+# Даем рядам имена генов
+rownames(htseq_raw) <- gene_names
+```
+
+```{r}
+# Читаем каунты
+salmon_counts <- read.csv("salmon/counts_raw.csv")
+# Присваиваем имена генов
+gene_names <- salmon_counts[[1]]
+# Даем рядам имена генов
+rownames(salmon_counts) <- gene_names
+```
+
+
+```{r}
+# Читаем каунты
+salmon_gene_counts <- read.csv("salmon/gene_counts_raw.csv")
+# Присваиваем имена генов
+gene_names <- salmon_gene_counts[[1]]
+# Даем рядам имена генов
+rownames(salmon_gene_counts) <- gene_names
+```
+
+Смотрим на распределение
+```{r}
+create_counts_distribution <- function(raw_counts_df){
+  total_counts <- raw_counts_df |> 
+    summarise(across(where(is.numeric), ~ sum(.x)))
+  
+  samples <- total_counts |> t() |> rownames()
+  counts <- total_counts |> t()
+  
+  df_for_filt <- tibble(
+    sample = samples,
+    counts = counts
+  )
+  
+  return(df_for_filt)
+}
+
+salmon_total_tr_counts <- create_counts_distribution(salmon_counts)
+salmon_total_gene_counts <- create_counts_distribution(salmon_gene_counts)
+htseq_total_counts <- create_counts_distribution(htseq_raw)
+```
+
+Фильтруем по оригинальной отсечке 
+
+> TODO Сделать relative-отсечку
+
+```{r}
+salmon_total_filtered_samples <- salmon_total_tr_counts |> 
+  filter(counts > 5000000) |> 
+  pull(sample)
+htseq_total_filtered_samples <- htseq_total_counts |> 
+  filter(counts > 5000000)|> 
+  pull(sample)
+salmon_total_filtered_gene_samples <- salmon_total_gene_counts |> 
+  filter(counts > 5000000) |> 
+  pull(sample)
+```
+
+### Расчет метаданных
+
+```{r}
+# Читаем метаданные
+metad <- read_csv("metadata.csv")
+# Создаем функцию с вектором группы
+create_condition_vector <- function(metad, filtered_names, target_vector){
+  metad |> 
+    filter(`Sample name` %in% filtered_names) |> 
+    pull(target_vector)
+}
+
+htseq_ages <- create_condition_vector(metad, htseq_total_filtered_samples, "characteristics: age")
+salmon_ages <- create_condition_vector(metad, salmon_total_filtered_samples, "characteristics: age")
+```
+
+## Генерируем TMM
+
+```{r}
+tmm_creator <- function(raw_counts_df, filtered_samples, grouping_vector){
+  raw_counts_df <- raw_counts_df[, filtered_samples]
+  edge_dge <- DGEList(counts=raw_counts_df, group=grouping_vector)
+  # Фильтруем по генам
+  keep <- filterByExpr(edge_dge, group=grouping_vector)
+  edge_dge <- edge_dge[keep,,keep.lib.sizes=FALSE]
+  # Делаем TMM
+  edge_dge <- normLibSizes(edge_dge, method = "TMM")
+  return(edge_dge)
+}
+
+tmm_htseq <- tmm_creator(htseq_raw, htseq_total_filtered_samples, htseq_ages)
+tmm_salmon_tr <- tmm_creator(salmon_counts, salmon_total_filtered_samples, salmon_ages)
+tmm_salmon_genes <- tmm_creator(salmon_gene_counts, salmon_total_filtered_samples, salmon_ages)
+```
+
+### TMM для Эржены в csv
+
+```{r}
+tmm_for_ergena <- function(tmm_df, output_name){
+  features <- tmm_df@.Data[[1]] |> rownames()
+  main_data <- tmm_df@.Data[[1]] |> as.data.frame()
+  main_data <- main_data |> 
+    mutate(
+      feature = features, .before = 1
+    )
+  write_csv(main_data, paste0("tmm_filtered_", output_name, ".csv"))
+}
+
+tmm_for_ergena(tmm_htseq, "htseq")
+tmm_for_ergena(tmm_salmon_genes, "salmon_genes")
+tmm_for_ergena(tmm_salmon_tr, "salmon_trs")
+```
+
+
+## Генерируем TPM
+
+### HTSeq
+
+```{r}
+
+```
+
+### Salmon (гены)
+
+```{r}
+
+```
+
+### Salmon (транскрипты)
+
+```{r}
+
+```
+
+
+## Генерируем таблицы ДЭ
+
+### HTSeq
+
+```{r}
+tmm_htseq
+tmm_salmon_tr
+tmm_salmon_genes
+
+de <- function(edge_df, group_vector){
+  design <- model.matrix(~group_vector)
+  fit <- glmQLFit(edge_df,design)
+  qlf <- glmQLFTest(fit)
+}
+
+de(tmm_htseq)
+de(tmm_salmon_tr)
+de(tmm_salmon_genes)
+```
+
+### Salmon (гены)
+
+```{r}
+
+```
+
+### Salmon (транскрипты)
+
+```{r}
+
+```
+
+
+#### HTSEQ
+
+Проверка на фильтрацию каунтов
+```{r}
+# htseq_total_counts <- htseq_raw |> 
+#   summarise(across(everything(), ~ sum(.x)))
+# 
+# samples_ht <- htseq_total_counts |> t() |> rownames()
+# counts_ht <- htseq_total_counts |> t()
+# 
+# ht_for_filt <- tibble(
+#   sample = samples_ht,
+#   counts = counts_ht
+# )
+# 
+# good_ht_samples <- ht_for_filt |> 
+#   filter(counts > 5000000) |> 
+#   pull(sample)
+```
+
+
+```{r}
+# Проверяем на наличие каунтов с нулевой экспрессией
+# Делаем эджаровский объект
+# edge_dge <- DGEList(counts=htseq_raw, group=age_group)
+# # Проверяем, есть лм образцы с нулевой экспрессией
+# null_lib <-(edge_dge@.Data[[2]][["lib.size"]] > 0)
+# null_lib |> sum()
+# 
+# good_colnames <- colnames(htseq_raw[,null_lib])
+# # Фильтруем
+# htseq_raw <- htseq_raw[, good_colnames]
+# age_group <- age_group[null_lib]
+# # Делаем эджаровский объект снова
+# edge_dge <- DGEList(counts=htseq_raw, group=age_group)
+# # Фильтруем
+# keep <- filterByExpr(edge_dge, group=age_group)
+# edge_dge <- edge_dge[keep,,keep.lib.sizes=FALSE]
+# # Делаем TMM
+# edge_dge <- normLibSizes(edge_dge, method = "TMM")
+# samples <- edge_dge@.Data[[1]] |> colnames()
+# genes <- edge_dge@.Data[[1]] |> rownames()
+# edge_dge@.Data[[1]] |> as.data.frame() |> write_csv("htseq_without_pre_filtering_tmm.csv")
+# design <- model.matrix(~age_group)
+# fit <- glmQLFit(edge_dge,design)
+# qlf <- glmQLFTest(fit)
+# topTags(qlf)
+```
+
+
+#### salmon
+
+##### Поэкзонно
+
+```{r}
+# Читаем каунты
+# salmon_counts <- read.csv("salmon/counts_raw.csv")
+# # Присваиваем имена генов
+# gene_names <- salmon_counts[[1]]
+# # Убираем NA-ные образцы
+# salmon_counts <- salmon_counts[, valid_names]
+# # Даем рядам имена генов
+# rownames(salmon_counts) <- gene_names
+```
+
+```{r}
+# Проверяем на наличие каунтов с нулевой экспрессией
+# Делаем эджаровский объект
+# edge_sal <- DGEList(counts=salmon_counts, group=age_group)
+# # Проверяем, есть лм образцы с нулевой экспрессией
+# null_lib <-(edge_sal@.Data[[2]][["lib.size"]] > 0)
+# 
+# good_colnames <- colnames(salmon_counts[,null_lib])
+# # Фильтруем
+# salmon_counts <- salmon_counts[, good_colnames]
+# age_group <- age_group[null_lib]
+# # Делаем эджаровский объект снова
+# edge_sal <- DGEList(counts=salmon_counts, group=age_group)
+# # Фильтруем
+# keep <- filterByExpr(edge_sal, group=age_group)
+# edge_sal <- edge_sal[keep,,keep.lib.sizes=FALSE]
+# # Делаем TMM
+# edge_sal <- normLibSizes(edge_sal, method = "TMM")
+# samples <- edge_sal@.Data[[1]] |> colnames()
+# genes <- edge_sal@.Data[[1]] |> rownames()
+# edge_sal@.Data[[1]] |> as.data.frame() |> write_csv("salmon_exon_without_pre_filtering_tmm.csv")
+# saveRDS(edge_sal, "salmon_tmm.Rdata")
+# design <- model.matrix(~age_group)
+# fit <- glmQLFit(edge_sal,design)
+# qlf <- glmQLFTest(fit)
+# topTags(qlf)
+```
+
+
+##### Погенно
+
+
+
+Проверка на фильтрацию каунтов
+```{r}
+# salmon_gene_total_counts <- salmon_gene_counts |> 
+#   summarise(across(everything(), ~ sum(.x)))
+# 
+# samples_salmon <- salmon_gene_total_counts |> t() |> rownames()
+# counts_salmon <- salmon_gene_total_counts |> t()
+# 
+# salmon_for_filt <- tibble(
+#   sample = samples_salmon,
+#   counts = counts_salmon
+# )
+# good_salmon_samples <- salmon_for_filt |> 
+#   filter(counts > 5000000) |> 
+#   pull(sample)
+```
+
+
+```{r}
+# Проверяем на наличие каунтов с нулевой экспрессией
+# Делаем эджаровский объект
+# edge_gene_sal <- DGEList(counts=salmon_gene_counts, group=age_group)
+# # Проверяем, есть лм образцы с нулевой экспрессией
+# null_lib <-(edge_gene_sal@.Data[[2]][["lib.size"]] > 0)
+# 
+# good_colnames <- colnames(salmon_gene_counts[,null_lib])
+# # Фильтруем
+# salmon_gene_counts <- salmon_gene_counts[, good_colnames]
+# age_group <- age_group[null_lib]
+# # Делаем эджаровский объект снова
+# edge_gene_sal <- DGEList(counts=salmon_gene_counts, group=age_group)
+# # Фильтруем
+# keep <- filterByExpr(edge_gene_sal, group=age_group)
+# edge_gene_sal <- edge_gene_sal[keep,,keep.lib.sizes=FALSE]
+# # Делаем TMM
+# edge_gene_sal <- normLibSizes(edge_gene_sal, method = "TMM")
+# samples <- edge_gene_sal@.Data[[1]] |> colnames()
+# genes <- edge_gene_sal@.Data[[1]] |> rownames()
+# edge_gene_sal@.Data[[1]] |> as.data.frame() |> write_csv("salmon_gene_without_pre_filtering_tmm.csv")
+# saveRDS(edge_gene_sal, "salmon_tmm.Rdata")
+# design <- model.matrix(~age_group)
+# fit <- glmQLFit(edge_gene_sal,design)
+# qlf <- glmQLFTest(fit)
+# topTags(qlf)
+```
+
+
+#### FeatureCounts
+
+```{r}
+# Проверяем на наличие каунтов с нулевой экспрессией
+# Делаем эджаровский объект
+# edge_sal <- DGEList(counts=salmon_gene_counts, group=age_group)
+# # Проверяем, есть лм образцы с нулевой экспрессией
+# null_lib <-(edge_sal@.Data[[2]][["lib.size"]] > 0)
+# 
+# good_colnames <- colnames(salmon_gene_counts[,null_lib])
+# # Фильтруем
+# salmon_gene_counts <- salmon_gene_counts[, good_colnames]
+# age_group <- age_group[null_lib]
+# # Делаем эджаровский объект снова
+# edge_sal <- DGEList(counts=salmon_gene_counts, group=age_group)
+# # Фильтруем
+# keep <- filterByExpr(edge_sal, group=age_group)
+# edge_sal <- edge_sal[keep,,keep.lib.sizes=FALSE]
+# # Делаем TMM
+# edge_sal <- normLibSizes(edge_sal, method = "TMM")
+# samples <- edge_sal@.Data[[1]] |> colnames()
+# genes <- edge_sal@.Data[[1]] |> rownames()
+# edge_sal@.Data[[1]] |> as.data.frame() |> write_csv("salmon_exon_without_pre_filtering_tmm.csv")
+# saveRDS(edge_sal, "salmon_tmm.Rdata")
+# design <- model.matrix(~age_group)
+# fit <- glmQLFit(edge_sal,design)
+# qlf <- glmQLFTest(fit)
+# topTags(qlf)
+```
+
