@@ -32,11 +32,20 @@ def transcript_features(db_path, output_tsv):
         total_exonic_length = sum(e.end - e.start + 1 for e in exons)
 
         # 5' UTR length
-        five_utr = list(db.children(transcript, featuretype="five_prime_UTR", order_by="start"))
+        found_exon = False
+        five_utr = []
+        three_utr = []
+        for c in db.children(transcript, featuretype=('exon', 'UTR'), order_by="start"):
+            if c.featuretype == 'exon': 
+                found_exon = True
+                continue
+            if found_exon:
+                three_utr.append(c)
+            else:
+                five_utr.append(c)
+        if transcript.strand == '-':
+            five_utr, three_utr = three_utr, five_utr
         five_utr_length = sum(u.end - u.start + 1 for u in five_utr) if five_utr else 0
-
-        # 3' UTR length
-        three_utr = list(db.children(transcript, featuretype="three_prime_UTR", order_by="start"))
         three_utr_length = sum(u.end - u.start + 1 for u in three_utr) if three_utr else 0
 
         # CDS length
