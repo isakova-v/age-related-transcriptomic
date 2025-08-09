@@ -20,11 +20,12 @@ def transcript_features(db_path, output_tsv):
             gene_id = gene[0].attributes.get("gene_id", [""])[0]
             gene_name = gene[0].attributes.get("gene_name", [""])[0]
         else:
-            gene_id = ""
-            gene_name = ""
+            gene_id = "*"
+            gene_name = "*"
 
         # Transcript type
-        transcript_type = transcript.attributes.get("transcript_type", [""])[0] if "transcript_type" in transcript.attributes else ""
+        transcript_type = transcript.attributes.get("transcript_type", [""])[0] if "transcript_type" in transcript.attributes else "*"
+        protein_id = transcript.attributes.get("protein_id", [""])[0] if "protein_id" in transcript.attributes else "*"
 
         # Exons
         exons = list(db.children(transcript, featuretype="exon", order_by="start"))
@@ -59,6 +60,7 @@ def transcript_features(db_path, output_tsv):
             five_utr_length,
             three_utr_length,
             transcript_type,
+            protein_id,
             cds_length,
             exon_count,
             total_exonic_length
