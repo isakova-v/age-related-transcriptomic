@@ -5,13 +5,25 @@ editor: visual
 ---
 
 ```{r}
+# Подгружаем бибилотеки
 library(edgeR)
-library(EDASeq)
 library(clusterProfiler)
 library(org.Mm.eg.db)
 library(IOBR)
 library(tidyverse)
 library(rlang)
+
+# Задаем кастомную тему
+theme_custom <- theme(
+    panel.background = element_rect(fill = "white"),
+    plot.title = element_text(size = 30, hjust = 0.5),
+    plot.subtitle = element_text(size = 25, hjust = 0.5),
+    strip.text = element_text(size = 20),
+    axis.text = element_text(size = 20),
+    axis.title = element_text(size = 25),
+    legend.title = element_text(size = 25),
+    legend.text = element_text(size = 20)
+  )
 ```
 
 # Стратегия проверки
@@ -26,19 +38,15 @@ library(rlang)
 4. Посмотреть на ДЭ, сравнить разные эксперименты (направление ДЭ, логфолчендж для разных генов)
 
 > TODO Фильтрация как в статье
-> DE пан-тишью и потканевая
 > Меры отличия: 
 - количество выпадающих образцов (фильтр по образцам)
 - количество выпадающих генов (фильтр по генам и спецфильтр по генам)
-- дифэкспрессия
 
 > Попробовать функцию count2tpm для перевода в тпмы
 
 > Для исследования с фильтром как в статье -- отличия стабильных генов.
 
 > Для гитхаба -- зафиксировать версии пакетов
-
-Итого 18 DE на 2 вида фильтрации и 3 типа пайплайнов (108)
 
 > Подготовить генерацию констрастов
 
@@ -157,8 +165,7 @@ metad <- metad |>
       `characteristics: age` %in% c("month_9", "month_12", "month_15") ~ "middle_aged",
       # Авторы не написали, к какой группе относятся 18-месячные мыши
       `characteristics: age` %in% c("month_18", "month_21", "month_24", "month_27") ~ "old"
-    ), #|> as.factor() |> fct_relevel("adolescent", "young", "middle_aged", "old"),
-    #`characteristics: age` = `characteristics: age` |> as.factor() |> fct_relevel(c("month_1", "month_3", "month_6", "month_9", "month_12", "month_15", "month_18", "month_21", "month_24", "month_27")),
+    ),
     tissue = `source name` |> str_split_i("_[:digit:]", 1)
   )
 
@@ -170,12 +177,6 @@ salmon_ages_article <- create_condition_vector(metad, salmon_total_filtered_samp
 salmon_tissues <- create_condition_vector(metad, salmon_total_filtered_samples, "tissue")
 ```
 
-```{r}
-# metad |> 
-#   filter(`characteristics: age` == "month_6") |> 
-#   select(`Sample name`) |> write_csv("month_6_samples.csv")
-```
-
 ### PCA
 
 ```{r}
@@ -183,15 +184,6 @@ tpm_salmon <- read_csv("tpm_salmon_gene.csv")
 str(tpm_salmon)
 pre_pca <- prcomp(tpm_salmon |> select(where(is.numeric)))
 summary(pre_pca)
-```
-
-```{r}
-# library(factoextra)
-# library(ggbiplot)
-# library(ggfortify)
-# fviz_eig(pre_pca, addlabels = T, ylim = c(0, 40))
-# 
-# autoplot(pre_pca, data = )
 ```
 
 ## Генерируем TMM
@@ -251,14 +243,14 @@ tmm_salmon_genes_tissue <- tmm_creator(salmon_gene_counts, salmon_total_filtered
 # Функция для разбиение на поддатасеты
 tissue_splitter <- function(count_df, metad, grouping_factor){
   spl_list <- map(split(metad, metad[grouping_factor]), \(b) b |> pull(`Sample name`))
-  final_list <- map(spl_list, \(b) htseq_raw |> select(b))
+  final_list <- map(spl_list, \(b) count_df |> select(b))
   
   return(final_list)
 }
 
 # Разбили
 htseq_by_tissue_raw <- tissue_splitter(htseq_raw, metad, "tissue")
-salmon_by_tissue_raw <- tissue_splitter(salmon_raw, metad, "tissue")
+salmon_by_tissue_raw <- tissue_splitter(salmon_gene_counts, metad, "tissue")
 ```
 
 ```{r}
@@ -283,30 +275,6 @@ return(edge_dge)
 }
 ```
 
-
-# Дебаг
-
-```{r}
-# tmp1_salmon <- salmon_gene_counts[, salmon_total_filtered_samples]
-# edge_dge <- DGEList(counts=tmp1_salmon, group=salmon_ages)
-# edge_counts <- edge_dge@.Data[[1]] |> as.data.frame() |> 
-#   dplyr::summarise(across(where(is.numeric), ~sum(.x)))
-```
-
-
-### Подход из статьи
-
-```{r}
-# tmm_creator_article <- function(raw_counts_df, filtered_samples, grouping_vector){
-#   raw_counts_df <- raw_counts_df[, filtered_samples]
-#   edge_dge <- DGEList(counts=raw_counts_df, group=grouping_vector)
-#   # Фильтруем по генам, убираем только нулевую экспрессию
-#   keep <- filterByExpr(edge_dge, group=grouping_vector, min.count=1)
-#   
-# }
-```
-
-
 ### TMM для Эржены в csv
 
 ```{r}
@@ -328,29 +296,9 @@ tmm_for_ergena(tmm_salmon_tr, "salmon_trs")
 
 ## Генерируем TPM
 
-Расчет длины генов
+Функция для TPM
 
 ```{r}
-# # Переводим айдишники в энсембл при необходимости
-# htseq_genes_mgi <- rownames(htseq_raw)
-# htseq_genes <- birt(htseq_genes_mgi, fromType = "SYMBOL", toType = "ENSEMBL", OrgDb = "org.Mm.eg.db")
-# salmon_genes <- rownames(salmon_gene_counts)
-# # Расчитываем длину генов
-# htseq_length <- getGeneLengthAndGCContent(htseq_genes, "mmu", mode=c("biomart", "org.db"))
-# salmon_length <- getGeneLengthAndGCContent(salmon_genes, "mmu", mode=c("biomart", "org.db"))
-```
-
-Функия для TPM
-
-```{r}
-# tpm_counter <- function(counts_df, length_vector){
-#   # Псевдокод!
-#   big_dataset <- left_join(length_vector, counts_df, by = var(""))
-#   big_dataset |> 
-#     mutate(
-#       across(where(is.numeric(), ~ ))  # Убрать длину и гц из оценки
-#     )
-# }
 tpm_counter2 <- function(counts_df, filtered_samples, symbol="Ensembl"){
   counts_df <- counts_df[, filtered_samples]
   tpm_matrix <- count2tpm(countMat = counts_df, idType = symbol, org = "mmus")
@@ -363,10 +311,6 @@ tpm_counter2 <- function(counts_df, filtered_samples, symbol="Ensembl"){
 # Salmon
 tpm_salmon_gene <- tpm_counter2(salmon_gene_counts, salmon_total_filtered_samples)
 write_csv(tpm_salmon_gene, "tpm_salmon_gene.csv")
-
-# Salmon transcripts
-#tpm_salmon_trs <- tpm_counter2(salmon_counts, salmon_total_filtered_samples)
-write_csv(tpm_salmon_trs, "tpm_salmon_trs.csv")
 
 # Htseq
 tpm_htseq <- tpm_counter2(htseq_raw, htseq_total_filtered_samples, "Symbol")
@@ -469,92 +413,6 @@ lrt_htseq_18 <- lrt_show(de_htseq_month, contr_18)
 lrt_htseq_21 <- lrt_show(de_htseq_month, contr_21)
 lrt_htseq_24 <- lrt_show(de_htseq_month, contr_24)
 lrt_htseq_27 <- lrt_show(de_htseq_month, contr_27)
-```
-
-
-```{r}
-# age_month_table <- expand.grid(htseq_ages |> unique(), htseq_ages |> unique()) |> 
-#   mutate(
-#     num1 = Var1 |> str_split_i("_", 2) |> as.integer(),
-#     num2 = Var2 |> str_split_i("_", 2) |> as.integer()
-#   ) |> 
-#   filter(num2 > num1) |> 
-#   dplyr::arrange(
-#     num1, num2
-#   ) |> 
-#   mutate(contrast = paste0(Var2, "-", Var1)) |> 
-#   select(Var1, Var2, contrast)
-# 
-# design <- model.matrix(~htseq_ages)
-# 
-# res_contr <- makeContrasts(
-#   age_month_table$contrast,
-#   levels = levels(htseq_ages)
-# )
-
-# contrs <- makeContrasts(
-#   month_1 - month_3,
-#   month_1 - month_9,
-#   month_1 - month_12,
-#   month_1 - month_15,
-#   month_1 - month_18,
-#   month_1 - month_21,
-#   month_1 - month_24,
-#   month_1 - month_27,
-#   levels = htseq_ages |> unique()
-# )
-
-
-
-
-# makeContrasts(
-#   month_3 - month_1,
-#   month_18 - month_12,
-#   month_27 - month_6,
-#   levels = levels(htseq_ages)
-# )
-
-# m_1_6_contr <- makeContrasts(
-#   month_1 - month_6,
-#   levels = htseq_ages |> unique()
-# )
-# 
-# # lfc_all <- glmLRT(htseq_de_fit, coef = 4)
-# lfc_all <- glmLRT(htseq_de_fit, contrast = m_1_6_contr)
-# results(lfc_all)
-# lfc_all@.Data[[14]] |> filter(PValue < 0.05)
-# 
-# m_1_3_contr <- makeContrasts(
-#   month_1 - month_3,
-#   levels = htseq_ages |> unique()
-# )
-# lfc_all_3 <- glmLRT(htseq_de_fit, contrast = m_1_3_contr)
-# lfc_all_3@.Data[[14]] |> filter(PValue < 0.05)
-# 
-# 
-# 
-# # lfc_all <- glmLRT(htseq_de_fit, coef = 4)
-# lfc_all_s <- glmLRT(salmon_de_fit, contrast = m_1_6_contr)
-# lfc_all_s@.Data[[14]] |> filter(PValue < 0.05)
-# 
-# 
-# lfc_all_3_s <- glmLRT(salmon_de_fit, contrast = m_1_3_contr)
-# lfc_all_3_s@.Data[[14]] |> filter(PValue < 0.05)
-# 
-# m_6_9_contr <- makeContrasts(
-#   month_6 - month_9,
-#   levels = htseq_ages |> unique()
-# )
-
-# salmon_de_fit <- readRDS("salmon_gene_glm_fit.rds")
-
-# lfc_all_6_9_s <- glmLRT(salmon_de_fit, contrast = m_6_9_contr)
-# lfc_all_6_9_s@.Data[[14]] |> filter(PValue < 0.05)
-# 
-# (htseq_ages |> unique())[-1]
-# levels(htseq_ages)
-
-
 ```
 
 Дебаг
@@ -813,7 +671,6 @@ pre_cor_raw_counts_df_with_meta <- pre_cor_raw_counts_df |> left_join(
   metad, by = "Sample name"
 )
 
-
 saveRDS(pre_cor_raw_counts_df_with_meta, "pre_cor_raw_counts_df.rds")
 
 pre_cor_raw_counts_df_with_meta <- readRDS("pre_cor_raw_counts_df.rds")
@@ -875,211 +732,40 @@ lfc_comparator_with_comparing(lrt_htseq_24, lrt_salmon_24)
 lfc_comparator_with_comparing(lrt_htseq_27, lrt_salmon_27)
 ```
 
-### Корреляция между lfc для разном уровне сравнения 1-го месяца с более поздними стадиями
+### Корреляция между lfc по тканям для разном уровне сравнения 1-го месяца с более поздними стадиями
 
 ```{r}
-map2(lfc_htseq_27_res, lfc_salmon_27_res, \(b, d) lfc_comparator_with_comparing(b, d))
+tissues_cor_3 <- map2(lfc_htseq_3_res, lfc_salmon_3_res, \(b, d) lfc_comparator_with_comparing(b, d))
+tissues_cor_6 <- map2(lfc_htseq_6_res, lfc_salmon_6_res, \(b, d) lfc_comparator_with_comparing(b, d))
+tissues_cor_9 <- map2(lfc_htseq_9_res, lfc_salmon_9_res, \(b, d) lfc_comparator_with_comparing(b, d))
+tissues_cor_12 <- map2(lfc_htseq_12_res, lfc_salmon_12_res, \(b, d) lfc_comparator_with_comparing(b, d))
+tissues_cor_15 <- map2(lfc_htseq_15_res, lfc_salmon_15_res, \(b, d) lfc_comparator_with_comparing(b, d))
+tissues_cor_18 <- map2(lfc_htseq_18_res, lfc_salmon_18_res, \(b, d) lfc_comparator_with_comparing(b, d))
+tissues_cor_21 <- map2(lfc_htseq_21_res, lfc_salmon_21_res, \(b, d) lfc_comparator_with_comparing(b, d))
+tissues_cor_24 <- map2(lfc_htseq_24_res, lfc_salmon_24_res, \(b, d) lfc_comparator_with_comparing(b, d))
+tissues_cor_27 <- map2(lfc_htseq_27_res, lfc_salmon_27_res, \(b, d) lfc_comparator_with_comparing(b, d))
 
-# test_de_1 <- lfc_htseq_27_res[[1]]
-# test_de_2 <- lfc_salmon_27_res[[1]]
-
-# sym_to_ens <- bitr(rownames(test_de_1), fromType = "SYMBOL", toType = "ENSEMBL", OrgDb = "org.Mm.eg.db")
-# lfc_delta <- left_join(
-#   sym_to_ens |> rename(feature = "SYMBOL"), 
-#   test_de_1 |> 
-#     mutate(feature = rownames(test_de_1)),
-#   by = "feature"
-# ) |> 
-# select(-feature) |>
-# rename(feature = "ENSEMBL",
-#        htseq_logFC = "logFC") |> 
-# inner_join(
-#   test_de_2 |> 
-#     mutate(feature = rownames(test_de_2)) |> 
-#     rename(salmon_logFC = "logFC"),
-#   by = "feature"
-# )
-#   
-#   cor(lfc_delta$salmon_logFC, lfc_delta$htseq_logFC)
-
-# lfc_comparator_with_comparing(lfc_htseq_27_res[[1]], lfc_salmon_27_res[[1]])
+salmon_htseq_corrs <- do.call(rbind, map(list(tissues_cor_3, tissues_cor_6, tissues_cor_9, 
+      tissues_cor_12, tissues_cor_15, tissues_cor_18, 
+      tissues_cor_21, tissues_cor_24, tissues_cor_27), as.data.frame))
 ```
 
 
-# Old pipeline
-
-#### HTSEQ
-
-Проверка на фильтрацию каунтов
-```{r}
-# htseq_total_counts <- htseq_raw |> 
-#   summarise(across(everything(), ~ sum(.x)))
-# 
-# samples_ht <- htseq_total_counts |> t() |> rownames()
-# counts_ht <- htseq_total_counts |> t()
-# 
-# ht_for_filt <- tibble(
-#   sample = samples_ht,
-#   counts = counts_ht
-# )
-# 
-# good_ht_samples <- ht_for_filt |> 
-#   filter(counts > 5000000) |> 
-#   pull(sample)
+Оценим, насколько скоррелированы результаты salmon и htseq в разных тканях и для мышей разного срока
+```{r fig.width=20, fig.height=12}
+salmon_htseq_corrs |> 
+  mutate(month = c(3, 6, 9, 12, 15, 18, 21, 24, 27)) |> 
+  pivot_longer(!month, names_to="tissue", values_to="counts") |> 
+  ggplot()+
+  geom_point(aes(x = counts, y = tissue, size = month, colour = month), shape = 21, stroke = 2)+
+  scale_colour_gradient(low = "skyblue", high = "firebrick1")+
+  theme_custom
 ```
 
+### Сравнение обогащения GO и KEGG
 
-```{r}
-# Проверяем на наличие каунтов с нулевой экспрессией
-# Делаем эджаровский объект
-# edge_dge <- DGEList(counts=htseq_raw, group=age_group)
-# # Проверяем, есть лм образцы с нулевой экспрессией
-# null_lib <-(edge_dge@.Data[[2]][["lib.size"]] > 0)
-# null_lib |> sum()
-# 
-# good_colnames <- colnames(htseq_raw[,null_lib])
-# # Фильтруем
-# htseq_raw <- htseq_raw[, good_colnames]
-# age_group <- age_group[null_lib]
-# # Делаем эджаровский объект снова
-# edge_dge <- DGEList(counts=htseq_raw, group=age_group)
-# # Фильтруем
-# keep <- filterByExpr(edge_dge, group=age_group)
-# edge_dge <- edge_dge[keep,,keep.lib.sizes=FALSE]
-# # Делаем TMM
-# edge_dge <- normLibSizes(edge_dge, method = "TMM")
-# samples <- edge_dge@.Data[[1]] |> colnames()
-# genes <- edge_dge@.Data[[1]] |> rownames()
-# edge_dge@.Data[[1]] |> as.data.frame() |> write_csv("htseq_without_pre_filtering_tmm.csv")
-# design <- model.matrix(~age_group)
-# fit <- glmQLFit(edge_dge,design)
-# qlf <- glmQLFTest(fit)
-# topTags(qlf)
-```
+#### Совпадение среди up-регулированных
 
+#### Совпадение среди down-регулированных
 
-#### salmon
-
-##### Поэкзонно
-
-```{r}
-# Читаем каунты
-# salmon_counts <- read.csv("salmon/counts_raw.csv")
-# # Присваиваем имена генов
-# gene_names <- salmon_counts[[1]]
-# # Убираем NA-ные образцы
-# salmon_counts <- salmon_counts[, valid_names]
-# # Даем рядам имена генов
-# rownames(salmon_counts) <- gene_names
-```
-
-```{r}
-# Проверяем на наличие каунтов с нулевой экспрессией
-# Делаем эджаровский объект
-# edge_sal <- DGEList(counts=salmon_counts, group=age_group)
-# # Проверяем, есть лм образцы с нулевой экспрессией
-# null_lib <-(edge_sal@.Data[[2]][["lib.size"]] > 0)
-# 
-# good_colnames <- colnames(salmon_counts[,null_lib])
-# # Фильтруем
-# salmon_counts <- salmon_counts[, good_colnames]
-# age_group <- age_group[null_lib]
-# # Делаем эджаровский объект снова
-# edge_sal <- DGEList(counts=salmon_counts, group=age_group)
-# # Фильтруем
-# keep <- filterByExpr(edge_sal, group=age_group)
-# edge_sal <- edge_sal[keep,,keep.lib.sizes=FALSE]
-# # Делаем TMM
-# edge_sal <- normLibSizes(edge_sal, method = "TMM")
-# samples <- edge_sal@.Data[[1]] |> colnames()
-# genes <- edge_sal@.Data[[1]] |> rownames()
-# edge_sal@.Data[[1]] |> as.data.frame() |> write_csv("salmon_exon_without_pre_filtering_tmm.csv")
-# saveRDS(edge_sal, "salmon_tmm.Rdata")
-# design <- model.matrix(~age_group)
-# fit <- glmQLFit(edge_sal,design)
-# qlf <- glmQLFTest(fit)
-# topTags(qlf)
-```
-
-
-##### Погенно
-
-
-
-Проверка на фильтрацию каунтов
-```{r}
-# salmon_gene_total_counts <- salmon_gene_counts |> 
-#   summarise(across(everything(), ~ sum(.x)))
-# 
-# samples_salmon <- salmon_gene_total_counts |> t() |> rownames()
-# counts_salmon <- salmon_gene_total_counts |> t()
-# 
-# salmon_for_filt <- tibble(
-#   sample = samples_salmon,
-#   counts = counts_salmon
-# )
-# good_salmon_samples <- salmon_for_filt |> 
-#   filter(counts > 5000000) |> 
-#   pull(sample)
-```
-
-
-```{r}
-# Проверяем на наличие каунтов с нулевой экспрессией
-# Делаем эджаровский объект
-# edge_gene_sal <- DGEList(counts=salmon_gene_counts, group=age_group)
-# # Проверяем, есть лм образцы с нулевой экспрессией
-# null_lib <-(edge_gene_sal@.Data[[2]][["lib.size"]] > 0)
-# 
-# good_colnames <- colnames(salmon_gene_counts[,null_lib])
-# # Фильтруем
-# salmon_gene_counts <- salmon_gene_counts[, good_colnames]
-# age_group <- age_group[null_lib]
-# # Делаем эджаровский объект снова
-# edge_gene_sal <- DGEList(counts=salmon_gene_counts, group=age_group)
-# # Фильтруем
-# keep <- filterByExpr(edge_gene_sal, group=age_group)
-# edge_gene_sal <- edge_gene_sal[keep,,keep.lib.sizes=FALSE]
-# # Делаем TMM
-# edge_gene_sal <- normLibSizes(edge_gene_sal, method = "TMM")
-# samples <- edge_gene_sal@.Data[[1]] |> colnames()
-# genes <- edge_gene_sal@.Data[[1]] |> rownames()
-# edge_gene_sal@.Data[[1]] |> as.data.frame() |> write_csv("salmon_gene_without_pre_filtering_tmm.csv")
-# saveRDS(edge_gene_sal, "salmon_tmm.Rdata")
-# design <- model.matrix(~age_group)
-# fit <- glmQLFit(edge_gene_sal,design)
-# qlf <- glmQLFTest(fit)
-# topTags(qlf)
-```
-
-
-#### FeatureCounts
-
-```{r}
-# Проверяем на наличие каунтов с нулевой экспрессией
-# Делаем эджаровский объект
-# edge_sal <- DGEList(counts=salmon_gene_counts, group=age_group)
-# # Проверяем, есть лм образцы с нулевой экспрессией
-# null_lib <-(edge_sal@.Data[[2]][["lib.size"]] > 0)
-# 
-# good_colnames <- colnames(salmon_gene_counts[,null_lib])
-# # Фильтруем
-# salmon_gene_counts <- salmon_gene_counts[, good_colnames]
-# age_group <- age_group[null_lib]
-# # Делаем эджаровский объект снова
-# edge_sal <- DGEList(counts=salmon_gene_counts, group=age_group)
-# # Фильтруем
-# keep <- filterByExpr(edge_sal, group=age_group)
-# edge_sal <- edge_sal[keep,,keep.lib.sizes=FALSE]
-# # Делаем TMM
-# edge_sal <- normLibSizes(edge_sal, method = "TMM")
-# samples <- edge_sal@.Data[[1]] |> colnames()
-# genes <- edge_sal@.Data[[1]] |> rownames()
-# edge_sal@.Data[[1]] |> as.data.frame() |> write_csv("salmon_exon_without_pre_filtering_tmm.csv")
-# saveRDS(edge_sal, "salmon_tmm.Rdata")
-# design <- model.matrix(~age_group)
-# fit <- glmQLFit(edge_sal,design)
-# qlf <- glmQLFTest(fit)
-# topTags(qlf)
-```
-
+#### Противоположная дифэкспрессия (up-down)
