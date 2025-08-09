@@ -45,6 +45,7 @@ def main():
     parser.add_argument("--mapping", required=True, help="Gene-transcript mapping TSV (col1=transcript_id, col3=gene_id)")
     parser.add_argument("--metadata", required=True, help="Metadata CSV (col1=sample_id, col5=age, col7=sex)")
     parser.add_argument("--sex", choices=["m", "f", "both"], default="both", help="Filter by sex: m, f, or both")
+    parser.add_argument("--tissue", default=None, help="Tissue to use")
     parser.add_argument("--output", required=True, help="Output CSV for results")
     parser.add_argument("--plot_top", type=int, default=10, help="Number of top variable genes to plot")
     parser.add_argument("--plot_dir", default="plots", help="Directory to save plots")
@@ -53,10 +54,17 @@ def main():
     args = parser.parse_args()
 
     print("📂 Reading input files...")
-    counts_df = pd.read_csv(args.counts, index_col=0)
     gene_list = pd.read_csv(args.gene_list, header=None)[0].tolist()
     mapping_df = pd.read_csv(args.mapping, sep="\t", header=None, usecols=[0, 2], names=["transcript_id", "gene_id"])
+    if "." not in gene_list[0]:
+        genes_id_map = {}
+        for g in mapping_df['gene_id']:
+            genes_id_map[g.split('.')[0]] = g
+        gene_list = list(filter(lambda x: x is not None, map(lambda x: genes_id_map[x] if x in genes_id_map else None, gene_list)))
+        
+   
     metadata_df = pd.read_csv(args.metadata)
+    counts_df = pd.read_csv(args.counts, index_col=0)
     
     # Load mapping
     mapping_full = pd.read_csv(args.mapping, sep="\t", header=None)
@@ -68,6 +76,7 @@ def main():
     sample_col = metadata_df.columns[0]
     age_col = metadata_df.columns[4]
     sex_col = metadata_df.columns[6]
+    tissue_col = metadata_df.columns[2]
 
     # Ensure sample IDs are strings
     metadata_df[sample_col] = metadata_df[sample_col].astype(str)
@@ -86,7 +95,11 @@ def main():
     if args.sex != "both":
         print(f"ℹ Filtering samples for sex: {args.sex}")
         metadata_df = metadata_df[metadata_df[sex_col].str.lower() == args.sex.lower()]
-
+        
+    if args.tissue is not None:
+        print(f"ℹ Filtering samples for tissue: {args.tissue}")
+        metadata_df = metadata_df[metadata_df[tissue_col].str.split('_').str[0] == args.tissue]
+        
     # Filter to specific bins/ages if provided
     if args.bins_to_use:
         bins_keep = set(args.bins_to_use.split(","))
@@ -154,8 +167,8 @@ def main():
     # Plotting
     print(f"📊 Generating plots for top {args.plot_top} genes...")
     os.makedirs(args.plot_dir, exist_ok=True)
-    top_genes = results_df.head(args.plot_top)["gene_id"].tolist()
-
+    top_genes = results_df[results_df['max_proportion_difference_percent'] >= 40]["gene_id"].tolist()
+    
     for gene in top_genes:
         avg_props = gene_avg_props[gene]
         avg_props.plot(kind="bar", stacked=True, figsize=(8, 5))
