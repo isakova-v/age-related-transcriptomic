@@ -1,183 +1,178 @@
-#!/usr/bin/env python3
-import argparse
 import pandas as pd
-import numpy as np
+import argparse
 import matplotlib.pyplot as plt
 import os
 
-# --------------------
-# Helper functions
-# --------------------
-
-def define_age_groups(age):
-    """Map age values (months) to age bins."""
+def bin_age(age):
+    """
+    Convert numeric age into categorical bin.
+    Returns a string bin label or None if age does not fit.
+    """
+    try:
+        age = float(age)
+    except ValueError:
+        return None
     if age == 1:
-        return "Adolescent (1m)"
+        return "adolescent"
     elif 3 <= age <= 6:
-        return "Young (3-6m)"
+        return "young"
     elif 9 <= age <= 15:
-        return "Middle (9-15m)"
+        return "middle"
     elif age >= 18:
-        return "Old (18m+)"
+        return "old"
     else:
-        return "Other"
+        return None
 
-def sort_age_groups(groups, binning):
-    """Sort age groups chronologically."""
-    if binning:
-        order = ["Adolescent (1m)", "Young (3-6m)", "Middle (9-15m)", "Old (18m+)", "Other"]
-        return [g for g in order if g in groups]
+def sort_age_groups(groups, use_binning):
+    """
+    Sort age groups in a chronological order.
+    - If binned: adolescent -> young -> middle -> old
+    - If not binned: numeric sort
+    """
+    if use_binning:
+        order = ["adolescent", "young", "middle", "old"]
+        return sorted(groups, key=lambda g: order.index(g) if g in order else len(order))
     else:
-        # Numeric sort if not binning
         try:
-            return sorted(groups, key=lambda x: float(x))
+            return sorted(groups, key=lambda g: float(g))
         except ValueError:
-            return sorted(groups)
-
-# --------------------
-# Main script
-# --------------------
+            return sorted(groups)  # fallback to string sort
 
 def main():
-    parser = argparse.ArgumentParser(description="Compute transcript proportions and variability by age.")
-    parser.add_argument("--counts", required=True, help="CSV with transcript counts (columns = samples)")
-    parser.add_argument("--gene_list", required=True, help="File with list of gene IDs")
-    parser.add_argument("--mapping", required=True, help="TSV with transcript_id (col1), transcript_name (col2), gene_id (col3), gene_name (col4)")
-    parser.add_argument("--metadata", required=True, help="CSV with sample metadata; col1=sample id, col5=age (months), col7=sex (m/f)")
-    parser.add_argument("--output", required=True, help="Output CSV for variability results")
-    parser.add_argument("--plot_dir", required=True, help="Directory to save plots")
+    parser = argparse.ArgumentParser(description="Compute transcript proportion variability by age/age bins and plot stacked proportions.")
+    parser.add_argument("--counts", required=True, help="Transcript normalized counts CSV (rows=transcripts, cols=samples)")
+    parser.add_argument("--gene_list", required=True, help="File with list of gene IDs (one per line)")
+    parser.add_argument("--mapping", required=True, help="Gene-transcript mapping TSV (col1=transcript_id, col3=gene_id)")
+    parser.add_argument("--metadata", required=True, help="Metadata CSV (col1=sample_id, col5=age, col7=sex)")
+    parser.add_argument("--sex", choices=["m", "f", "both"], default="both", help="Filter by sex: m, f, or both")
+    parser.add_argument("--output", required=True, help="Output CSV for results")
     parser.add_argument("--plot_top", type=int, default=10, help="Number of top variable genes to plot")
-    parser.add_argument("--use_binning", action="store_true", help="Use age binning instead of raw ages")
-    parser.add_argument("--age_filter", nargs="+", help="Specific ages or bins to include")
-    parser.add_argument("--sex", choices=["m", "f", "both"], default="both", help="Filter by sex")
+    parser.add_argument("--plot_dir", default="plots", help="Directory to save plots")
+    parser.add_argument("--use_binning", action="store_true", help="Whether to bin ages into categories")
+    parser.add_argument("--bins_to_use", default=None, help="Comma-separated list of bins/ages to keep (e.g. young,old or 1,3,6)")
     args = parser.parse_args()
 
-    print("📂 Loading data...")
-
-    # Load counts (index = transcript IDs, columns = samples)
+    print("📂 Reading input files...")
     counts_df = pd.read_csv(args.counts, index_col=0)
-
-    # Load gene list
-    with open(args.gene_list) as f:
-        gene_list = [line.strip() for line in f if line.strip()]
-
-    # Load mapping
-    mapping_df = pd.read_csv(args.mapping, sep="\t", header=None)
-    mapping_df.columns = ["transcript_id", "transcript_name", "gene_id", "gene_name"]
-    gene_name_map = dict(zip(mapping_df["gene_id"], mapping_df["gene_name"]))
-    transcript_name_map = dict(zip(mapping_df["transcript_id"], mapping_df["transcript_name"]))
-
-    # Load metadata
+    gene_list = pd.read_csv(args.gene_list, header=None)[0].tolist()
+    mapping_df = pd.read_csv(args.mapping, sep="\t", header=None, usecols=[0, 2], names=["transcript_id", "gene_id"])
     metadata_df = pd.read_csv(args.metadata)
-    metadata_df.columns = [f"col{i+1}" for i in range(metadata_df.shape[1])]
-    sample_col = "col1"
-    age_col = "col5"
-    sex_col = "col7"
+    
+    # Load mapping
+    mapping_full = pd.read_csv(args.mapping, sep="\t", header=None)
+    mapping_full.columns = ["transcript_id", "transcript_name", "gene_id", "gene_name"]
+    gene_name_map = dict(zip(mapping_full["gene_id"], mapping_full["gene_name"]))
+    transcript_name_map = dict(zip(mapping_full["transcript_id"], mapping_full["transcript_name"]))
 
-    # Apply sex filter if needed
-    if args.sex != "both":
-        before_count = len(metadata_df)
-        metadata_df = metadata_df[metadata_df[sex_col] == args.sex]
-        print(f"👥 Filtered by sex '{args.sex}': {before_count} -> {len(metadata_df)} samples")
+    # Identify columns for sample_id, age, sex
+    sample_col = metadata_df.columns[0]
+    age_col = metadata_df.columns[4]
+    sex_col = metadata_df.columns[6]
 
-    # Create age_group column
+    # Ensure sample IDs are strings
+    metadata_df[sample_col] = metadata_df[sample_col].astype(str)
+    counts_df.columns = counts_df.columns.astype(str)
+
+    print(f"ℹ Using binning: {args.use_binning}")
     if args.use_binning:
-        metadata_df["age_group"] = metadata_df[age_col].apply(define_age_groups)
+        metadata_df["age_group"] = metadata_df[age_col].apply(bin_age)
     else:
         metadata_df["age_group"] = metadata_df[age_col].astype(str)
 
-    # Apply age filter if specified
-    if args.age_filter:
-        before_count = len(metadata_df)
-        metadata_df = metadata_df[metadata_df["age_group"].isin(args.age_filter)]
-        print(f"⏳ Filtered by age: {before_count} -> {len(metadata_df)} samples")
+    # Drop rows with no age group assigned
+    metadata_df = metadata_df[metadata_df["age_group"].notna()]
 
-    print("🔄 Processing genes...")
+    # Filter by sex
+    if args.sex != "both":
+        print(f"ℹ Filtering samples for sex: {args.sex}")
+        metadata_df = metadata_df[metadata_df[sex_col].str.lower() == args.sex.lower()]
+
+    # Filter to specific bins/ages if provided
+    if args.bins_to_use:
+        bins_keep = set(args.bins_to_use.split(","))
+        print(f"ℹ Keeping only age groups: {', '.join(bins_keep)}")
+        metadata_df = metadata_df[metadata_df["age_group"].isin(bins_keep)]
+
+    # Filter mapping to relevant genes
+    mapping_df = mapping_df[mapping_df["gene_id"].isin(gene_list)]
 
     results = []
     gene_avg_props = {}
 
+    print("🔄 Processing genes...")
     for gene in gene_list:
-        # Find transcripts for this gene
-        gene_transcripts = mapping_df[mapping_df["gene_id"] == gene]["transcript_id"].tolist()
-        if not gene_transcripts:
+        # Get transcripts for this gene that are present in the counts table
+        transcripts = mapping_df.loc[mapping_df["gene_id"] == gene, "transcript_id"].tolist()
+        transcripts = [t for t in transcripts if t in counts_df.index]
+        if len(transcripts) < 2:
+            continue  # Skip genes with <2 transcripts
+
+        # Extract counts for these transcripts
+        gene_counts = counts_df.loc[transcripts]
+
+        # Merge counts with metadata to attach age group info
+        merged = gene_counts.T.merge(metadata_df[[sample_col, "age_group"]], left_index=True, right_on=sample_col)
+
+        # Skip if only one age group is present
+        if merged["age_group"].nunique() < 2:
             continue
 
-        # Subset counts for these transcripts
-        sub_counts = counts_df.loc[counts_df.index.intersection(gene_transcripts)]
-        if sub_counts.empty:
-            continue
+        # Compute proportions within each sample (per gene)
+        merged[transcripts] = merged[transcripts].div(merged[transcripts].sum(axis=1), axis=0)
 
-        # Merge counts with metadata
-        merged = sub_counts.T.merge(metadata_df[[sample_col, "age_group"]],
-                                    left_index=True, right_on=sample_col)
+        # Convert proportions to percentages and average per age group
+        avg_props = merged.groupby("age_group")[transcripts].mean() * 100
 
-        age_groups = sort_age_groups(merged["age_group"].unique(), args.use_binning)
-        prop_table = []
+        # Sort rows by chronological order
+        age_order = sort_age_groups(avg_props.index.tolist(), args.use_binning)
+        avg_props = avg_props.loc[age_order]
 
-        for age_group in age_groups:
-            # Get counts for samples in this age group
-            group_counts = merged[merged["age_group"] == age_group].set_index(sample_col)
-            mean_counts = group_counts[gene_transcripts].mean()
-            total = mean_counts.sum()
-            if total == 0:
-                proportions = [0] * len(mean_counts)
-            else:
-                proportions = (mean_counts / total * 100).tolist()  # percentage
-            prop_table.append(proportions)
+        # Store for plotting later
+        gene_avg_props[gene] = avg_props
 
-        # Create DataFrame of proportions
-        prop_df = pd.DataFrame(prop_table, columns=gene_transcripts, index=age_groups)
+        # Compute variability score = max transcript shift between age groups
+        max_diff = 0
+        max_transcript = None
+        for t in transcripts:
+            diff = avg_props[t].max() - avg_props[t].min()
+            if diff > max_diff:
+                max_diff = diff
+                max_transcript = t
 
-        # Calculate variability measure (max proportion difference between any two ages)
-        variability = max(prop_df.max() - prop_df.min())
-
-        # Store results
         results.append({
             "gene_id": gene,
             "gene_name": gene_name_map.get(gene, ""),
-            "max_proportion_difference_percent": variability
+            "max_proportion_difference_percent": max_diff,
+            "transcript_with_max_diff": max_transcript
         })
-        gene_avg_props[gene] = prop_df
 
-    # Sort by variability
-    results_df = pd.DataFrame(results)
-    results_df = results_df.sort_values(by="max_proportion_difference_percent", ascending=False)
+    # Save results
+    results_df = pd.DataFrame(results).sort_values("max_proportion_difference_percent", ascending=False)
     results_df.to_csv(args.output, index=False)
-    print(f"💾 Results written to {args.output}")
+    print(f"✅ Analysis complete. Results saved to {args.output}")
 
-    # Plot top N variable genes
+    # Plotting
+    print(f"📊 Generating plots for top {args.plot_top} genes...")
     os.makedirs(args.plot_dir, exist_ok=True)
-    for gene in results_df.head(args.plot_top)["gene_id"]:
-        prop_df = gene_avg_props[gene]
-        fig, ax = plt.subplots(figsize=(8, 6))
+    top_genes = results_df.head(args.plot_top)["gene_id"].tolist()
 
-        # Transcript labels with names
-        transcripts = prop_df.columns
-        transcript_labels = [f"{transcript_name_map.get(tid, tid)} ({tid})" for tid in transcripts]
-
-        prop_df.plot(kind="bar", stacked=True, ax=ax,
-                     color=plt.cm.tab20.colors[:len(transcripts)])
-
-        ax.set_ylabel("Proportion (%)")
-        ax.set_xlabel("Age / Age bin")
-        ax.set_ylim(0, 100)
-
-        gene_label = f"{gene_name_map.get(gene, '')} ({gene})"
-        ax.set_title(f"Isoform proportions - {gene_label}")
-
-        ax.legend(transcript_labels, title="Transcripts", bbox_to_anchor=(1.05, 1), loc="upper left")
-
-        # Add variability value below legend
-        var_value = results_df.loc[results_df["gene_id"] == gene, "max_proportion_difference_percent"].values[0]
-        ax.text(1.05, 0.5, f"Variability: {var_value:.1f}%", transform=ax.transAxes, fontsize=10)
-
+    for gene in top_genes:
+        avg_props = gene_avg_props[gene]
+        avg_props.plot(kind="bar", stacked=True, figsize=(8, 5))
+        gene_name = gene_name_map.get(gene, '')
+        var_value = str(int(results_df.loc[results_df["gene_id"] == gene, "max_proportion_difference_percent"].values[0]))
+        gene_label = f"{gene_name} ({gene})"
+        plt.title(f"{gene_label} - {var_value}")
+        plt.ylabel("Proportion (%)")
+        plt.xlabel("Age group")
+        plt.ylim(0, 100)
+        plt.legend(title="Transcript ID", bbox_to_anchor=(1.05, 1), loc='upper left')
         plt.tight_layout()
-        plot_path = os.path.join(args.plot_dir, f"{gene}.png")
-        plt.savefig(plot_path, dpi=300)
+
+        plt.savefig(os.path.join(args.plot_dir, f"{var_value}_{gene_name}_proportions.png"))
         plt.close()
 
-    print(f"📊 Plots saved to {args.plot_dir}")
+    print(f"📂 Plots saved to {args.plot_dir}")
 
 if __name__ == "__main__":
     main()
