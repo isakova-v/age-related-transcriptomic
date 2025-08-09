@@ -4,28 +4,26 @@ format: html
 editor: visual
 ---
 
-## Мысли
-
-Запускать `estimateSizeFactors()` с контрольными генами -- 9 пан-тишью и тканеспецифичные по ситуации. Не будет ли это дабл-диппингом?
-
 ```{r}
 # library(DESeq2)
 # library(clusterProfiler)
 # library(WGCNA)
 # library(IRanges)
 # library(tximport)
-# library(org.Mm.eg.db)
 library(edgeR)
 library(tidyverse)
 library(EDASeq)
+library(clusterProfiler)
+library(org.Mm.eg.db)
+library(IOBR)
 ```
 
 # Стратегия проверки
 
-1. Прочитать метадату, выкинуть NA
-2. Отфильтровать по каунтам HTSEQ
-2.1 Выкинуть образцы HTSEQ из FC и salmon
-2.2 Фильтровать по отсечке для каждого типа подсчета каунтов
+1. Прочитать метадату, выкинуть NA (есть)
+2. Отфильтровать по каунтам HTSEQ (есть)
+2.1 Выкинуть образцы HTSEQ из FC и salmon (сделаем на этапе корреляции)
+2.2 Фильтровать по отсечке для каждого типа подсчета каунтов 
 3. Сравнить полученные матрицы сырых ридов между собой
 3.1 Пирсоновская корреляция на общем датасете (без нулей везде)
 3.2 Пирсоновская корреляция на датасете, с максимальным удалением образцов
@@ -33,8 +31,24 @@ library(EDASeq)
 
 > TODO Фильтрация как в статье
 > DE пан-тишью и потканевая
+> Меры отличия: 
+- количество выпадающих образцов (фильтр по образцам)
+- количество выпадающих генов (фильтр по генам и спецфильтр по генам)
+- дифэкспрессия
 
-Итого 18 DE на 2 вида фильтрации (36)
+> Попробовать функцию count2tpm для перевода в тпмы
+
+> Для исследования с фильтром как в статье -- отличия стабильных генов.
+
+> Для гитхаба -- зафиксировать версии пакетов
+
+Итого 18 DE на 2 вида фильтрации и 3 типа пайплайнов (108)
+
+> Подготовить генерацию констрастов
+
+## Метаданные и расклады
+
+Добавляем возрастуню группу, как в оригинальной статье
 
 ## Таблица с каунтами
 
@@ -120,11 +134,33 @@ create_condition_vector <- function(metad, filtered_names, target_vector){
     pull(target_vector)
 }
 
+# Добавляем возрастную группу и тип ткани, как в оригинальной статье
+metad <- metad |> 
+  mutate(
+    age_group_article = case_when(
+      `characteristics: age` == "1" ~ "adolescent",
+      `characteristics: age` %in% c("3", "6") ~ "young",
+      `characteristics: age` %in% c("9", "12", "15") ~ "middle_aged",
+      # Авторы не написали, к какой группе относятся 18-месячные мыши
+      `characteristics: age` %in% c("18", "21", "24", "27") ~ "old"
+    ) |> as.factor() |> fct_relevel("adolescent", "young", "middle_aged", "old"),
+    `characteristics: age` = `characteristics: age` |> as.factor() |> fct_relevel(c("1", "3", "6", "9", "12", "15", "18", "21", "24", "27")),
+    tissue = `source name` |> str_split_i("_[:digit:]", 1)
+  )
+
 htseq_ages <- create_condition_vector(metad, htseq_total_filtered_samples, "characteristics: age")
 salmon_ages <- create_condition_vector(metad, salmon_total_filtered_samples, "characteristics: age")
 ```
 
+Сохраняем промежуточный результат
+```{r}
+save.image("pre_tmm_stage.RData")
+```
+
+
 ## Генерируем TMM
+
+### Стандартный подход
 
 ```{r}
 tmm_creator <- function(raw_counts_df, filtered_samples, grouping_vector){
@@ -142,6 +178,19 @@ tmm_htseq <- tmm_creator(htseq_raw, htseq_total_filtered_samples, htseq_ages)
 tmm_salmon_tr <- tmm_creator(salmon_counts, salmon_total_filtered_samples, salmon_ages)
 tmm_salmon_genes <- tmm_creator(salmon_gene_counts, salmon_total_filtered_samples, salmon_ages)
 ```
+
+### Подход из статьи
+
+```{r}
+# tmm_creator_article <- function(raw_counts_df, filtered_samples, grouping_vector){
+#   raw_counts_df <- raw_counts_df[, filtered_samples]
+#   edge_dge <- DGEList(counts=raw_counts_df, group=grouping_vector)
+#   # Фильтруем по генам, убираем только нулевую экспрессию
+#   keep <- filterByExpr(edge_dge, group=grouping_vector, min.count=1)
+#   
+# }
+```
+
 
 ### TMM для Эржены в csv
 
@@ -164,57 +213,78 @@ tmm_for_ergena(tmm_salmon_tr, "salmon_trs")
 
 ## Генерируем TPM
 
-### HTSeq
+Расчет длины генов
 
 ```{r}
-
+# # Переводим айдишники в энсембл при необходимости
+# htseq_genes_mgi <- rownames(htseq_raw)
+# htseq_genes <- birt(htseq_genes_mgi, fromType = "SYMBOL", toType = "ENSEMBL", OrgDb = "org.Mm.eg.db")
+# salmon_genes <- rownames(salmon_gene_counts)
+# # Расчитываем длину генов
+# htseq_length <- getGeneLengthAndGCContent(htseq_genes, "mmu", mode=c("biomart", "org.db"))
+# salmon_length <- getGeneLengthAndGCContent(salmon_genes, "mmu", mode=c("biomart", "org.db"))
 ```
 
-### Salmon (гены)
+Функия для TPM
 
 ```{r}
+# tpm_counter <- function(counts_df, length_vector){
+#   # Псевдокод!
+#   big_dataset <- left_join(length_vector, counts_df, by = var(""))
+#   big_dataset |> 
+#     mutate(
+#       across(where(is.numeric(), ~ ))  # Убрать длину и гц из оценки
+#     )
+# }
+tpm_counter2 <- function(counts_df, filtered_samples, symbol="Ensembl"){
+  counts_df <- counts_df[, filtered_samples]
+  tpm_matrix <- count2tpm(countMat = counts_df, idType = symbol, org = "mmus")
+  tpm_matrix <- tpm_matrix |> 
+    mutate(feature = rownames(tpm_matrix), .before = 1)
+  
+  return(tpm_matrix)
+}
 
+# Salmon
+tpm_salmon_gene <- tpm_counter2(salmon_gene_counts, salmon_total_filtered_samples)
+write_csv(tpm_salmon_gene, "tpm_salmon_gene.csv")
+
+# Htseq
+tpm_htseq <- tpm_counter2(htseq_raw, htseq_total_filtered_samples, "Symbol")
+sym_to_ens <- bitr(rownames(tpm_htseq), fromType = "SYMBOL", toType = "ALIAS", OrgDb = "org.Mm.eg.db") |> 
+  rename(feature = "SYMBOL")
+tpm_htseq <- tpm_htseq |> 
+  left_join(sym_to_ens, by = "feature") |> 
+  relocate("ALIAS", .after = feature)
+write_csv(tpm_htseq, "tpm_htseq.csv")
 ```
-
-### Salmon (транскрипты)
-
-```{r}
-
-```
-
 
 ## Генерируем таблицы ДЭ
 
-### HTSeq
-
 ```{r}
-tmm_htseq
-tmm_salmon_tr
-tmm_salmon_genes
-
-de <- function(edge_df, group_vector){
+# TODO -- можем ли запихнуть выржаение в качестве аргумента?
+de_simple_fit <- function(edge_df, group_vector){
   design <- model.matrix(~group_vector)
-  fit <- glmQLFit(edge_df,design)
-  qlf <- glmQLFTest(fit)
+  edge_df <- estimateDisp(edge_df, design)
+  fit <- glmFit(edge_df,design)
 }
 
-de(tmm_htseq)
-de(tmm_salmon_tr)
-de(tmm_salmon_genes)
-```
+htseq_de_fit <- de_simple(tmm_htseq, htseq_ages)
+# de_simple(tmm_salmon_tr, salmon_ages)
+salmon_de_fit <- de_simple(tmm_salmon_genes, salmon_ages)
 
-### Salmon (гены)
+saveRDS(htseq_de_fit, "htseq_glm_fit.rds")
+saveRDS(salmon_de_fit, "salmon_gene_glm_fit.rds")
+```
 
 ```{r}
-
+# saved_de <- readRDS("htseq_glm_fit.rds")
+# typeof(saved_de)
+# glmLRT(saved_de)
 ```
 
-### Salmon (транскрипты)
 
-```{r}
-
-```
-
+# Old pipeline
 
 #### HTSEQ
 
