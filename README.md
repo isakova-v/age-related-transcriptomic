@@ -237,7 +237,28 @@ Choose in the sidebar:
   - **GO enrichment** for the cluster (selectable library)
   - (If clustering by tissue) plot **term trajectory** (term∩cluster) over age in the selected tissue.
 
-> The **Isoforms** tab is provided in commented code for future work on splicing proportions by age.
+### H) Isoforms tab
+- **Purpose:** Displays transcript-level expression and detects isoform usage shifts between age groups.
+- **Data required:**
+  - `tx_counts_path` — transcript-level counts table.
+  - `gene_tx_map_path` — mapping of transcripts to genes.
+- **Analysis features:**
+  - Binning samples into age categories (`adolescent`, `young`, `middle`, `old`).
+  - Computing isoform usage percentage per age bin.
+  - Highlighting genes with large shifts (`min_shift_percent` threshold).
+  - Plotting top N genes (`top_genes_to_plot`) with the largest isoform changes.
+
+
+### I) Co-expression tab
+- **Purpose:** Identifies groups of genes with correlated expression profiles.
+- **Analysis features:**
+  - Calculates pairwise correlations (`pearson` or `spearman`).
+  - Filters gene pairs by `min_correlation` and `min_shared_samples`.
+  - Builds a co-expression network and detects communities using `cluster_method` (e.g., Louvain).
+  - Visualizes top edges (`plot_top_edges`) and cluster membership.
+- **Applications:**
+  - Discovering functional gene modules.
+  - Linking co-expression patterns with GO enrichment.
 
 ---
 
