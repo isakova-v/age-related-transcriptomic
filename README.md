@@ -9,8 +9,6 @@ A Streamlit app for rapid, exploratory analysis of age-related transcriptomic pa
 - Explore GO term presence and enrichment across tissues.
 - Cluster age trajectories (KMeans) and perform GO enrichment on clusters.
 
-> Note: an “Isoforms (splicing)” tab is scaffolded but currently commented out.
-
 ---
 
 ## 0) Reproducibility micro-benchmark
