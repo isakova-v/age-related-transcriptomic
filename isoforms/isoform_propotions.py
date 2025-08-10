@@ -2,6 +2,7 @@ import pandas as pd
 import argparse
 import matplotlib.pyplot as plt
 import os
+import numpy
 
 def bin_age(age):
     """
@@ -56,12 +57,22 @@ def main():
     print("📂 Reading input files...")
     gene_list = pd.read_csv(args.gene_list, header=None)[0].tolist()
     mapping_df = pd.read_csv(args.mapping, sep="\t", header=None, usecols=[0, 2], names=["transcript_id", "gene_id"])
-    if "." not in gene_list[0]:
+    if not gene_list[0].startswith("ENS"):
+        gene_name_mapping_df = pd.read_csv(args.mapping, sep="\t", header=None, usecols=[2, 3], names=["gene_id", "gene_name"])
+        genes_name_map = {}
+        for i, g in gene_name_mapping_df.iterrows():
+            genes_name_map[g['gene_name']] = g['gene_id']
+        gene_list = list(filter(lambda x: x is not None, map(lambda x: genes_name_map[x] if x in genes_name_map else None, gene_list)))
+    elif "." not in gene_list[0]:
         genes_id_map = {}
         for g in mapping_df['gene_id']:
             genes_id_map[g.split('.')[0]] = g
         gene_list = list(filter(lambda x: x is not None, map(lambda x: genes_id_map[x] if x in genes_id_map else None, gene_list)))
         
+    if not gene_list:
+        print("Gene list is empty, will not plot anything")
+        exit(0)
+    print("Gene list contains %d genes, first of which are %s" % (len(gene_list), str(gene_list[:5])))   
    
     metadata_df = pd.read_csv(args.metadata)
     counts_df = pd.read_csv(args.counts, index_col=0)
@@ -151,12 +162,19 @@ def main():
             if diff > max_diff:
                 max_diff = diff
                 max_transcript = t
-
+                
+        most_expressed_transcripts = []
+        for t in transcripts:
+            expr = numpy.mean(avg_props[t])
+            most_expressed_transcripts.append((t, expr))
+        most_expressed_transcripts = list(sorted(most_expressed_transcripts, key=lambda x: x[1], reverse=True))
+            
         results.append({
             "gene_id": gene,
             "gene_name": gene_name_map.get(gene, ""),
             "max_proportion_difference_percent": max_diff,
-            "transcript_with_max_diff": max_transcript
+            "top_transcript": most_expressed_transcripts[0][0],
+            "second_transcript": most_expressed_transcripts[1][0]
         })
 
     # Save results
@@ -165,9 +183,10 @@ def main():
     print(f"✅ Analysis complete. Results saved to {args.output}")
 
     # Plotting
-    print(f"📊 Generating plots for top {args.plot_top} genes...")
+    print(f"📊 Generating plots...")
     os.makedirs(args.plot_dir, exist_ok=True)
-    top_genes = results_df[results_df['max_proportion_difference_percent'] >= 40]["gene_id"].tolist()
+    #top_genes = results_df[results_df['max_proportion_difference_percent'] >= 40]["gene_id"].tolist()
+    top_genes = [] #results_df["gene_id"].tolist()
     
     for gene in top_genes:
         avg_props = gene_avg_props[gene]
