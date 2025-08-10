@@ -68,7 +68,11 @@ Table 3. Correlation by sex
 |  Male  |  0.7843201  |
 
 The results of all these (and some other) analysis summarised at figure 1.
+![Figure 1](../images/raw_count_corrs.png)
+
 
 The results of age-tissue correlations between log-fold-change (comparing to the 1-month adolescent mice) are at the figure 2.
+![Figure 2](../images/tiisue_age_lfc.png)
 
 The results of age-tissue top- and downregulated genes (with p < 0.05 and lfc > 1) presented at the figure 3.
+![Figure 3](../images/props_de.png)
