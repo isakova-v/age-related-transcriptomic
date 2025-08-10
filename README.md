@@ -15,7 +15,7 @@ A Streamlit app for rapid, exploratory analysis of age-related transcriptomic pa
 
 ## 0) Reproducibility micro-benchmark
 
-![]("https://github.com/isakova-v/age-related-transcriptomic/tree/main/images/image.jpg")
+![]("[https://github.com/isakova-v/age-related-transcriptomic/tree/main/images/image.jpg](https://github.com/isakova-v/age-related-transcriptomic/blob/main/images/salmon_vs_HTSeq.png)")
 
 > Motivation:
 there are multiple approaches and pipelines for analying RNA-seq data. It may be interesting to compare some different popular approaches and 
