@@ -21,7 +21,7 @@ check how distinguish are they.
 
 > Results: methods' convergence is far from ideal but isn't catastrophic. At the level of the raw counts the pearson correlation between methods was in range 0.7-0.9.
 
-> For more information please visit the [page]() of reproducibility readme.
+> For more information please visit the [page](https://github.com/isakova-v/age-related-transcriptomic/tree/main/htseq_salmon_fc_bench) of reproducibility readme.
 
 ## 1) Quick start
 
