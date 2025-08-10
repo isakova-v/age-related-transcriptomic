@@ -13,8 +13,6 @@ A Streamlit app for rapid, exploratory analysis of age-related transcriptomic pa
 
 ## 0) Reproducibility micro-benchmark
 
-![Reproducibility](images/salmon_vs_HTSeq.png)
-
 > Motivation:
 there are multiple approaches and pipelines for analying RNA-seq data. It may be interesting to compare some different popular approaches and 
 check how distinguish are they.
