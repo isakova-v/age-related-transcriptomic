@@ -1,0 +1,112 @@
+paths:
+  metadata: "../metadata.csv"
+  id_mapping: null   # например: "../mapping/uniprot_to_symbol.tsv"
+  datasets:
+    final_data: "../filtered_genes/tpm_clean.csv"
+    tpm_salmon_gene: "../../temp/tpm_salmon_gene.csv"
+    old_counts: "../counts/old_counts.csv"
+
+organism:
+  name: "mouse"
+  gene_id_namespace: "symbol"  # 'symbol' | 'ensembl' | 'uniprot'
+
+normalization:
+  mode_default: "raw"   # "raw" | "CPM" | "log1p(CPM)"
+  clean_gene_ids:
+    strip_version: true
+    preserve_case: true
+
+metadata_mapping:
+  sample_name_candidates: ["sample_name","sample","sampleid","sra_sample","biosample","run","raw_file"]
+  tissue_candidates: ["tissue","organ","source_name"]
+  sex_candidates: ["sex","characteristics__sex","characteristics_sex"]
+  age_candidates: ["age_months","age_in_months","agemonths","age_mo","age","age__months","characteristics_age","characteristics__age"]
+  final_names: { sample_name: "sample_name", tissue: "tissue", sex: "sex", age_raw: "age_raw" }
+  tissue_postprocess_split_on_underscore: true
+
+age_parsing:
+  assume_plain_number_is_months: true
+  range_pattern_enabled: true     # "3-5 months" -> среднее
+  units:
+    months: ["month","months","mo","m"]
+    weeks: ["week","weeks","w","wk"]
+    years: ["year","years","y","yr"]
+    days:  ["day","days","d"]
+    postnatal_days: ["P"]         # P21
+
+ui_defaults:
+  filters:
+    tissue_default: "__ALL__"     # или список: ["liver","brain"]
+    sex_default: "__ALL__"
+    age_months_default: [0.0, 36.0]
+
+embedding:
+  top_variable_genes: 1000
+  umap:
+    n_neighbors: 15
+    min_dist: 0.10
+  outliers:
+    z_threshold: 3.0
+
+heatmap_single_peak:
+  bin_width: 3.0
+  dominance_ratio: 1.5
+  min_genes_in_cluster: 15
+  top_clusters_to_show: 6
+
+go_enrichment:
+  default_library: "GO_Biological_Process_2023"
+  organism: "mouse"
+  min_genes_term_presence: 1
+  fdr_line: 0.05
+  libraries:
+    "GO: Biological Process (2023)": ["GO_Biological_Process_2023", "mouse"]
+    "GO: Molecular Function (2023)": ["GO_Molecular_Function_2023", "mouse"]
+    "GO: Cellular Component (2023)": ["GO_Cellular_Component_2023", "mouse"]
+
+patterns_clustering:
+  by_tissue_default: true
+  bin_width: 3.0
+  kmeans_k: 12
+  min_bins_per_gene: 4
+  zscore_trajectories: true
+  random_state: 0
+
+regression:
+  min_samples_per_gene: 8
+
+isoforms:
+  enabled: true
+  tx_counts_path: "../../temp/tmm_filtered_salmon_trs.csv"
+  gene_tx_map_path: "../gencode_vM22.transcript2gene.tsv"
+  map_columns: ["transcript_id","transcript_name","gene_id","gene_name"]
+  binning:
+    use_named_bins: true
+    named_bins: { adolescent: 1, young: [3,6], middle: [9,15], old: [18, null] }
+  display:
+    min_shift_percent: 40
+    top_genes_to_plot: 10
+  keep_bins: []   # можно задать, например: ["young","old"] или ["1","3","6"]
+  map_columns: ["transcript_id","transcript_name","gene_id","gene_name"]
+  binning:
+    use_named_bins: true
+    named_bins: { adolescent: 1, young: [3,6], middle: [9,15], old: [18, null] }
+  display:
+    min_shift_percent: 40
+    top_genes_to_plot: 10
+  keep_bins: []   # например: ["young","old"] или ["1","3","6"]
+
+features:
+  tabs_enabled:
+    overview: true
+    gene: true
+    pca_umap: true
+    heatmap: true
+    regression: true
+    go: true
+    patterns: true
+    isoforms: true
+
+limits:
+  max_head_rows_preview: 50
+  max_terms_show: 200
