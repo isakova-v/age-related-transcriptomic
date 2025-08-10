@@ -1,5 +1,7 @@
 # Reproducibility
 
+![Reproducibility](../images/salmon_vs_HTSeq.png)
+
 ## Technical details
 Analysis done on the R version 4.4.3.
 Packages versions:
