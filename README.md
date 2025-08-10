@@ -16,8 +16,10 @@ A Streamlit app for rapid, exploratory analysis of age-related transcriptomic pa
 ## 0) Reproducibility micro-benchmark
 > Motivation: there are multiple approaches and pipelines for analying RNA-seq data. It may be interesting to compare some different popular approaches and 
 check how distinguish are they.
+
 > Realisation: we used STAR+HTSeq from the original article (alignment and unique count estimation) and salmon (which produces pseudocounts)
-> Results: methods' convergence is far from ideal but isn't catastrophic. At the level of the raw counts the pearson correlation between methods is 0.78. The correlation 0.8-0.9 
+
+> Results: methods' convergence is far from ideal but isn't catastrophic. At the level of the raw counts the pearson correlation between methods was in range 0.7-0.9.
 
 ## 1) Quick start
 
