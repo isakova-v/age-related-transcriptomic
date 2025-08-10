@@ -48,7 +48,8 @@ def main():
     parser.add_argument("--sex", choices=["m", "f", "both"], default="both", help="Filter by sex: m, f, or both")
     parser.add_argument("--tissue", default=None, help="Tissue to use")
     parser.add_argument("--output", required=True, help="Output CSV for results")
-    parser.add_argument("--plot_top", type=int, default=10, help="Number of top variable genes to plot")
+    parser.add_argument("--plot_top", type=int, default=10, help="Number of top variable genes to plot (5)")
+    parser.add_argument("--min_var", type=float, default=40.0, help="Minimal variance (40%)")
     parser.add_argument("--plot_dir", default="plots", help="Directory to save plots")
     parser.add_argument("--use_binning", action="store_true", help="Whether to bin ages into categories")
     parser.add_argument("--bins_to_use", default=None, help="Comma-separated list of bins/ages to keep (e.g. young,old or 1,3,6)")
@@ -185,8 +186,7 @@ def main():
     # Plotting
     print(f"📊 Generating plots...")
     os.makedirs(args.plot_dir, exist_ok=True)
-    #top_genes = results_df[results_df['max_proportion_difference_percent'] >= 40]["gene_id"].tolist()
-    top_genes = [] #results_df["gene_id"].tolist()
+    top_genes = results_df[results_df['max_proportion_difference_percent'] >= args.min_var].head(args.plot_top)["gene_id"].tolist()
     
     for gene in top_genes:
         avg_props = gene_avg_props[gene]
